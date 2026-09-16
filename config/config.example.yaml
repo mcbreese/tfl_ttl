@@ -1,0 +1,13 @@
+# Non-secret pipeline configuration (secrets go in .env, not here).
+# Copy to config.yaml and adjust once the ingestion targets are decided.
+
+tfl:
+  # TfL Unified API paths to ingest, e.g. Line status, Air Quality, etc.
+  endpoints:
+    - /Line/Mode/tube/Status
+
+s3:
+  raw_prefix: "raw/tfl"
+
+athena:
+  database: tfl_ttl

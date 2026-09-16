@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tfl-ttl"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = [
+    "requests",
+    "python-dotenv",
+    "boto3",
+]
+
+[dependency-groups]
+dev = [
+    "jupyter",
+    "pandas",
+    "numpy",
+    "matplotlib",
+    "seaborn",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
