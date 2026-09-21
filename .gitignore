@@ -38,3 +38,6 @@ dbt/**/logs/
 Thumbs.db
 .vscode/
 .idea/
+
+# Claude Code local hook output
+.claude/session-end.log

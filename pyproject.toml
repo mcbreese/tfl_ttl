@@ -15,7 +15,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "jupyter",
-    "pandas",
+    "polars",
     "numpy",
     "matplotlib",
     "seaborn",

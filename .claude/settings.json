@@ -1,0 +1,13 @@
+{
+  "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+          }
+        ]
+      }
+    ]
+  }
+}
