@@ -5,6 +5,7 @@
         "hooks": [
           {
             "type": "command",
+            "command": "printf '[%s] Session ended — confirm the TFL Project Notion decision log was updated (see CLAUDE.md).\\n' \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >> \"$CLAUDE_PROJECT_DIR/.claude/session-end.log\""
           }
         ]
       }
