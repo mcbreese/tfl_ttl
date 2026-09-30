@@ -106,6 +106,8 @@ def expand_calls(frequency: str | None = None, feeds: tuple[Feed, ...] = FEEDS) 
 def validate_payload(payload: object, call: Call) -> None:
     """Raise if the payload is unusable. Everything softer is recorded, not raised."""
     if not isinstance(payload, list):
-        raise ValueError(f"{call.feed} ({call.mode}): expected a list, got {type(payload).__name__}")
+        raise ValueError(
+            f"{call.feed} ({call.mode}): expected a list, got {type(payload).__name__}"
+        )
     if not payload and not call.allow_empty:
         raise ValueError(f"{call.feed} ({call.mode}): empty response")
