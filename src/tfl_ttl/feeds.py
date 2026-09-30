@@ -143,7 +143,8 @@ def validate_payload(payload: object, call: Call) -> None:
     # allowed. Stricter checks belong in dbt tests on staging, where a failure
     # can be fixed by rerunning against raw. Messages name the feed and mode but
     # never include payload data. {x!r} shows quotes, so stray spaces are visible.
+    # TypeError for a wrong type, ValueError for a wrong value: Python's convention.
     if not isinstance(payload, list):
-        raise ValueError(f"{call.feed} ({call.mode}): expected a list, got {type(payload).__name__}")
+        raise TypeError(f"{call.feed} ({call.mode}): expected a list, got {type(payload).__name__}")
     if not payload and not call.allow_empty:
         raise ValueError(f"{call.feed} ({call.mode}): empty response")
