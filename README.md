@@ -47,6 +47,19 @@ copy .env.example .env
 Fill in `.env` with TfL app credentials (optional, raises rate limits) and
 your AWS profile/region/bucket once ingestion moves past EDA.
 
+## Linting and formatting
+
+CI (`.github/workflows/ci.yml`) runs ruff on every PR and push to `master`.
+Run the same checks locally before pushing:
+
+```bash
+uv run ruff check .          # lint (add --fix to auto-fix)
+uv run ruff format .         # format
+```
+
+Rules and line length live under `[tool.ruff]` in `pyproject.toml`.
+Notebooks are excluded.
+
 ## Current stage: EDA
 
 ```bash

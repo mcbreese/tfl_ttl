@@ -19,8 +19,28 @@ dev = [
     "numpy",
     "matplotlib",
     "seaborn",
-    "ruff>=0.16.8",
+    {include-group = "lint"},
+]
+# Kept separate so CI can install just the linters, not the whole EDA stack.
+# Pinned exactly: a ruff upgrade can add or change rules, so bump it deliberately.
+lint = [
+    "ruff==0.16.8",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+line-length = 100
+# Notebooks are exploratory scratch space; lint the package and tests only.
+extend-exclude = ["notebooks"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes: unused imports, undefined names
+    "I",   # isort: import ordering
+    "B",   # flake8-bugbear: likely bugs and footguns
+    "UP",  # pyupgrade: modern syntax for the target Python version
+]

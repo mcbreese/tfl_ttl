@@ -3217,6 +3217,9 @@ dev = [
     { name = "ruff" },
     { name = "seaborn" },
 ]
+lint = [
+    { name = "ruff" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -3231,9 +3234,10 @@ dev = [
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "polars" },
-    { name = "ruff", specifier = ">=0.16.8" },
+    { name = "ruff", specifier = "==0.16.8" },
     { name = "seaborn" },
 ]
+lint = [{ name = "ruff", specifier = "==0.16.8" }]
 
 [[package]]
 name = "tinycss2"
