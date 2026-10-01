@@ -44,6 +44,9 @@ testpaths = ["tests"]
 addopts = ["--cov=tfl_ttl", "--cov-branch", "--cov-report=term-missing"]
 
 [tool.coverage.report]
+# Any untested line fails the run, locally and in CI. New code needs a test, or
+# a deliberate `# pragma: no cover` with a comment saying why.
+fail_under = 100
 # Only true when run as the program; tests import the module instead.
 exclude_also = ['if __name__ == "__main__":']
 

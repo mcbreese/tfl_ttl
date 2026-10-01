@@ -49,7 +49,8 @@ your AWS profile/region/bucket once ingestion moves past EDA.
 
 ## Linting and formatting
 
-CI (`.github/workflows/ci.yml`) runs ruff on every PR and push to `master`.
+CI (`.github/workflows/ci.yml`) runs ruff and the tests on every PR and push
+to `master`.
 Run the same checks locally before pushing:
 
 ```bash
@@ -81,6 +82,23 @@ also make diffs noisy. Two things it does not cover:
 - **Secrets typed into code cells.** Load credentials from `.env` (see
   `config.py`) and never paste them into a cell.
 - **Skipped hooks.** A commit made with `--no-verify` keeps its outputs.
+
+## Tests
+
+```bash
+uv run pytest                        # all tests, with the coverage report
+uv run pytest tests/test_feeds.py    # one file
+uv run pytest -v                     # list each test by name
+uv run pytest --no-cov -x            # stop at the first failure, skip coverage
+```
+
+There's one test file per module in `src/tfl_ttl/`, plus shared fixtures in
+`tests/conftest.py`. No test touches TfL or AWS: the network and boto3 are
+faked, and an autouse fixture swaps in dummy AWS credentials.
+
+Coverage must stay at 100% (`fail_under` in `pyproject.toml`), and CI runs the
+suite on Python 3.10 and 3.13. 100% means every line ran, not that every
+behaviour is checked, so new code still needs tests that assert something.
 
 ## Current stage: EDA
 
