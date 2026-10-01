@@ -1,0 +1,25 @@
+# Install once per clone: uv run pre-commit install
+# Hooks run on staged files before each commit. They can be skipped with
+# --no-verify, so CI remains the real gate.
+repos:
+  # Ruff runs through uv so it uses the version pinned in uv.lock, the same
+  # one CI uses. A remote ruff hook would carry a second pin that can drift.
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix --force-exclude
+        language: system
+        types_or: [python, pyi]
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
+
+  # Strip notebook outputs: a printed API response can carry keys or personal
+  # data. Pinned to a commit SHA, like the GitHub Actions in .github/workflows.
+  - repo: https://github.com/kynan/nbstripout
+    rev: 34071b78c181af3bf5af955c1426466e096fc3db  # frozen: 0.9.1
+    hooks:
+      - id: nbstripout

@@ -19,6 +19,7 @@ dev = [
     "numpy",
     "matplotlib",
     "seaborn",
+    "pre-commit>=4.6.2",
     {include-group = "lint"},
 ]
 # Kept separate so CI can install just the linters, not the whole EDA stack.
