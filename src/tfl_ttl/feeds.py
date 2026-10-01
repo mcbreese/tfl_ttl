@@ -103,37 +103,55 @@ FEEDS = (
 )
 
 
-def expand_calls(frequency: str | None = None, feeds: tuple[Feed, ...] = FEEDS) -> list[Call]:
-    """Resolve feeds into one Call per mode, optionally filtered to a frequency."""
+# For argparse's --feed choices.
+FEED_NAMES = tuple(f.name for f in FEEDS)
+
+
+def expand_calls(
+    frequency: str | None = None,
+    feed: str | None = None,
+    feeds: tuple[Feed, ...] = FEEDS,
+) -> list[Call]:
+    """Resolve feeds into one Call per mode, optionally filtered to a frequency and/or one feed."""
     # argparse in __main__ already restricts --frequency, but the notebook (or a
     # future Lambda) can call this directly and skip it. Without this check a
     # typo like "Weekly" matches nothing, polls nothing, and the run ends green.
     if frequency is not None and frequency not in FREQUENCIES:
         raise ValueError(f"Unknown frequency {frequency!r}, expected one of {FREQUENCIES}")
+    # Same reasoning for a feed name. Checked against the `feeds` passed in, so
+    # tests can supply their own registry.
+    names = tuple(f.name for f in feeds)
+    if feed is not None and feed not in names:
+        raise ValueError(f"Unknown feed {feed!r}, expected one of {names}")
 
     # Returns a new list rather than appending to one passed in (as the
     # notebook's get_api_urls did), so every call is independent and the caller
     # doesn't need to set up an empty list first.
     calls = []
-    for feed in feeds:
-        if frequency and feed.frequency != frequency:
+    for f in feeds:
+        if frequency and f.frequency != frequency:
+            continue
+        if feed and f.name != feed:
             continue
         # Truthiness: an empty tuple, list, string, dict, 0 or None counts as
         # False in an if. So this reads "if the feed has any modes".
-        if feed.modes:
-            for mode in feed.modes:
+        if f.modes:
+            for mode in f.modes:
                 calls.append(
                     Call(
-                        feed=feed.name,
-                        url=feed.url.format(mode=mode),
+                        feed=f.name,
+                        url=f.url.format(mode=mode),
                         mode=mode,
-                        allow_empty=feed.allow_empty,
+                        allow_empty=f.allow_empty,
                     )
                 )
         else:
-            calls.append(
-                Call(feed=feed.name, url=feed.url, mode=None, allow_empty=feed.allow_empty)
-            )
+            calls.append(Call(feed=f.name, url=f.url, mode=None, allow_empty=f.allow_empty))
+
+    # Both names are valid but don't match, e.g. --feed modes --frequency
+    # twice_daily. Without this, the run would poll nothing and end green.
+    if feed and not calls:
+        raise ValueError(f"Feed {feed!r} isn't polled at frequency {frequency!r}")
     return calls
 
 

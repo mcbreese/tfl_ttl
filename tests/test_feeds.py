@@ -6,7 +6,15 @@
 
 import pytest
 
-from tfl_ttl.feeds import FEEDS, FREQUENCIES, Call, expand_calls, validate_payload
+from tfl_ttl.feeds import (
+    FEED_NAMES,
+    FEEDS,
+    FREQUENCIES,
+    Call,
+    Feed,
+    expand_calls,
+    validate_payload,
+)
 
 # --- expand_calls --------------------------------------------------------------
 # One test per behaviour, named after it, so a failing test's name says what broke.
@@ -54,6 +62,53 @@ def test_unknown_frequency_raises(bad_frequency):
     # unrelated ValueError.
     with pytest.raises(ValueError, match="Unknown frequency"):
         expand_calls(bad_frequency)
+
+
+# --feed: verifying one feed at a time.
+@pytest.mark.parametrize(
+    ("feed", "expected_count"),
+    [
+        ("modes", 1),
+        ("lines", 4),
+        ("stop_point_disruptions", 4),
+    ],
+)
+def test_feed_filter_returns_only_that_feed(feed, expected_count):
+    calls = expand_calls(feed=feed)
+    assert len(calls) == expected_count
+    assert {c.feed for c in calls} == {feed}
+
+
+def test_feed_and_frequency_filters_combine():
+    calls = expand_calls("weekly", "lines")
+    assert [c.mode for c in calls] == ["dlr", "elizabeth-line", "overground", "tube"]
+
+
+def test_unknown_feed_raises():
+    # The CLI's choices= catches this too, but direct callers (the notebook) don't
+    # go through the CLI. Without the check, a typo would poll nothing and pass.
+    with pytest.raises(ValueError, match="Unknown feed 'line-status'"):
+        expand_calls(feed="line-status")
+
+
+def test_feed_not_polled_at_that_frequency_raises():
+    # Both names are valid, but together they match nothing.
+    with pytest.raises(ValueError, match="'modes' isn't polled at frequency 'twice_daily'"):
+        expand_calls("twice_daily", "modes")
+
+
+def test_feed_names_are_checked_against_the_registry_passed_in():
+    only_one = (
+        Feed(name="solo", url="https://api.tfl.gov.uk/x", frequency="weekly", allow_empty=False),
+    )
+    assert [c.feed for c in expand_calls(feed="solo", feeds=only_one)] == ["solo"]
+    with pytest.raises(ValueError, match="Unknown feed 'modes'"):
+        expand_calls(feed="modes", feeds=only_one)
+
+
+def test_feed_names_match_the_registry():
+    # argparse's --feed choices come from FEED_NAMES.
+    assert FEED_NAMES == tuple(f.name for f in FEEDS)
 
 
 def _feed_names(frequency):
