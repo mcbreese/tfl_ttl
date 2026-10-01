@@ -1,0 +1,12 @@
+version: 2
+updates:
+  # Actions are pinned to commit SHAs in the workflows, so nothing updates on
+  # its own. Dependabot reads the "# vX.Y.Z" comment beside each pin and
+  # opens a PR when a newer release exists; CI then checks it like any change.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
