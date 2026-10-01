@@ -39,5 +39,11 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Test output (pytest's own .pytest_cache/ ignores itself)
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
 # Claude Code local hook output
 .claude/session-end.log
