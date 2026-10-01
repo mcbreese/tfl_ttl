@@ -21,15 +21,34 @@ dev = [
     "seaborn",
     "pre-commit>=4.6.2",
     {include-group = "lint"},
+    {include-group = "test"},
 ]
 # Kept separate so CI can install just the linters, not the whole EDA stack.
 # Pinned exactly: a ruff upgrade can add or change rules, so bump it deliberately.
 lint = [
     "ruff==0.16.8",
 ]
+# Likewise for the test job: the package plus pytest, without Jupyter and friends.
+test = [
+    "pytest",
+    "pytest-cov",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Coverage on every run, so a local run and CI report the same thing.
+# --cov-branch also checks both sides of each if/else were exercised.
+addopts = ["--cov=tfl_ttl", "--cov-branch", "--cov-report=term-missing"]
+
+[tool.coverage.report]
+# Any untested line fails the run, locally and in CI. New code needs a test, or
+# a deliberate `# pragma: no cover` with a comment saying why.
+fail_under = 100
+# Only true when run as the program; tests import the module instead.
+exclude_also = ['if __name__ == "__main__":']
 
 [tool.ruff]
 line-length = 100

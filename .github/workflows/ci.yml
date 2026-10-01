@@ -37,3 +37,33 @@ jobs:
 
       - name: Ruff format
         run: uv run --no-sync ruff format --check --diff .
+
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      # Let both versions finish even if one fails, so a failure that only
+      # happens on one version is visible as such.
+      fail-fast: false
+      matrix:
+        # 3.10 is the minimum pyproject.toml promises; 3.13 is what dev uses.
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+
+      # The package and the `test` group only. --no-default-groups skips `dev`
+      # (Jupyter and the EDA stack); --only-group would skip the package itself.
+      - name: Install package and test tools
+        run: uv sync --locked --no-default-groups --group test
+
+      # Coverage settings come from pyproject.toml, including fail_under = 100.
+      - name: Pytest with coverage
+        run: uv run --no-sync pytest
