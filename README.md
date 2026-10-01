@@ -60,6 +60,28 @@ uv run ruff format .         # format
 Rules and line length live under `[tool.ruff]` in `pyproject.toml`.
 Notebooks are excluded.
 
+### Pre-commit hooks
+
+The same ruff checks run automatically on each commit once the hooks are
+installed. Do this once per clone:
+
+```bash
+uv run pre-commit install
+uv run pre-commit run --all-files   # optional: check everything now
+```
+
+Hooks can be skipped with `--no-verify`, so CI is still the real gate.
+
+### Notebooks and secrets
+
+The `nbstripout` hook strips cell outputs from notebooks on commit. A
+printed API response can carry an app key or personal data, and outputs
+also make diffs noisy. Two things it does not cover:
+
+- **Secrets typed into code cells.** Load credentials from `.env` (see
+  `config.py`) and never paste them into a cell.
+- **Skipped hooks.** A commit made with `--no-verify` keeps its outputs.
+
 ## Current stage: EDA
 
 ```bash
