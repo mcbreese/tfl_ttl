@@ -1,7 +1,9 @@
-# Putting bytes into S3. Knows nothing about TfL, records or keys: it uploads
-# whatever it's given to whatever key it's given.
+# Moving bytes in and out of S3. Knows nothing about TfL, records or keys: it
+# uploads whatever it's given to whatever key it's given, and downloads a prefix
+# for local profiling.
 
 import logging
+from pathlib import Path
 
 # boto3 builds its clients dynamically, so there's no S3 client class to point
 # at. BaseClient is the common parent. For autocomplete on put_object's
@@ -42,3 +44,43 @@ def upload_to_s3(s3_client: BaseClient, bucket: str, key: str, body: bytes) -> d
     # Unused by the pipeline, but kept: the ETag and ChecksumSHA256 are a record
     # of what S3 stored, handy in the notebook and in tests.
     return response
+
+
+def download_prefix(s3_client: BaseClient, bucket: str, prefix: str, dest_dir: Path) -> list[Path]:
+    """Copy every object under prefix into dest_dir, keeping each key's folder path.
+
+    For local profiling. Needs a client with read access: the pipeline's own
+    writer credentials deliberately can't read. Returns the newly downloaded files.
+    """
+    dest_dir = Path(dest_dir).resolve()
+    downloaded = []
+
+    # list_objects_v2 returns at most 1,000 keys per call. The paginator keeps
+    # asking until there are none left, so a large prefix isn't silently cut short.
+    pages = s3_client.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix)
+    for page in pages:
+        # A page with no matches has no "Contents" key at all, hence .get(..., []).
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            # Zero-byte "folder" markers made by the S3 console, not real files.
+            if key.endswith("/"):
+                continue
+
+            # Keeping the key's path preserves the poll_date=... folders, so local
+            # tools can read them as partitions, like Athena will.
+            target = (dest_dir / key).resolve()
+            # Keys are just strings: one containing "../" could write outside
+            # dest_dir. Refuse rather than trust the bucket's contents.
+            if not target.is_relative_to(dest_dir):
+                raise ValueError(f"Refusing to write {key!r} outside {dest_dir}")
+
+            # Raw files are never changed once written, so an existing copy is current.
+            if target.exists():
+                continue
+
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(s3_client.get_object(Bucket=bucket, Key=key)["Body"].read())
+            downloaded.append(target)
+
+    logger.info("Downloaded %d new file(s) from s3://%s/%s", len(downloaded), bucket, prefix)
+    return downloaded

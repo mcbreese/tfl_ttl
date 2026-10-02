@@ -19,7 +19,7 @@ import requests
 from botocore.client import BaseClient
 
 from tfl_ttl import config
-from tfl_ttl.feeds import FREQUENCIES, Call, expand_calls, validate_payload
+from tfl_ttl.feeds import FEED_NAMES, FREQUENCIES, Call, expand_calls, validate_payload
 from tfl_ttl.record import build_record, generate_s3_key, poll_datetime, to_gzipped_line
 from tfl_ttl.s3 import upload_to_s3
 from tfl_ttl.tfl_api import call_api, create_robust_session
@@ -40,7 +40,7 @@ def poll(call: Call, session: requests.Session, s3_client: BaseClient) -> None:
     validate_payload(payload, call)
 
 
-def run(frequency: str | None = None) -> None:
+def run(frequency: str | None = None, feed: str | None = None) -> None:
     # Run-wide problems fail here, before the loop, once and clearly. Missing
     # credentials also surface here: boto3.client raises (e.g. ProfileNotFound)
     # outside the try below, so nothing is polled that couldn't be saved.
@@ -52,7 +52,7 @@ def run(frequency: str | None = None) -> None:
     session = create_robust_session()
 
     failures = []
-    for call in expand_calls(frequency):
+    for call in expand_calls(frequency, feed):
         # Per-call problems are caught here so one bad feed doesn't lose the rest.
         # The broad `except Exception` isn't swallowing anything: the traceback
         # is logged, the failure is collected, and the run still raises below.
@@ -79,6 +79,11 @@ def main() -> None:
         choices=FREQUENCIES,
         help="Only poll feeds with this frequency. Omit to poll all of them.",
     )
+    parser.add_argument(
+        "--feed",
+        choices=FEED_NAMES,
+        help="Only poll this one feed (all its modes). Useful for verifying feeds one at a time.",
+    )
     args = parser.parse_args()
 
     # Configured here, once, in the entry point. Library modules only create
@@ -86,7 +91,7 @@ def main() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
     )
-    run(args.frequency)
+    run(args.frequency, args.feed)
 
 
 # __name__ is "__main__" only when this file runs as the program (python -m

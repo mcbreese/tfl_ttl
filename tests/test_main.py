@@ -90,6 +90,15 @@ def test_run_uploads_one_file_per_call(pipeline):
     pipeline.make_client.assert_called_once_with("s3", region_name=config.AWS_REGION)
 
 
+def test_run_with_a_feed_polls_only_that_feed(pipeline):
+    main.run(feed="lines")
+
+    keys = uploaded_keys(pipeline)
+    # One call per mode, and nothing from any other feed.
+    assert len(keys) == 4
+    assert all(k.startswith("raw/test/lines/") for k in keys)
+
+
 def test_run_passes_the_app_key_to_every_request(pipeline):
     main.run("weekly")
     assert {c["app_key"] for c in pipeline.api_calls} == {"test-key"}
@@ -178,7 +187,10 @@ def test_unknown_frequency_raises_before_any_request(pipeline):
 def fake_run(monkeypatch):
     """Replace run() so main() can be tested without polling anything."""
     calls = []
-    monkeypatch.setattr(main, "run", lambda frequency=None: calls.append(frequency))
+    # Records (frequency, feed) for each call.
+    monkeypatch.setattr(
+        main, "run", lambda frequency=None, feed=None: calls.append((frequency, feed))
+    )
     # main() calls logging.basicConfig, which would change logging for every
     # later test. Replace it for the duration of the test.
     monkeypatch.setattr(logging, "basicConfig", lambda **kwargs: None)
@@ -189,26 +201,35 @@ def fake_run(monkeypatch):
 @pytest.mark.parametrize(
     ("argv", "expected"),
     [
-        (["tfl_ttl"], None),
-        (["tfl_ttl", "--frequency", "weekly"], "weekly"),
-        (["tfl_ttl", "--frequency", "twice_daily"], "twice_daily"),
+        (["tfl_ttl"], (None, None)),
+        (["tfl_ttl", "--frequency", "weekly"], ("weekly", None)),
+        (["tfl_ttl", "--frequency", "twice_daily"], ("twice_daily", None)),
+        (["tfl_ttl", "--feed", "lines"], (None, "lines")),
+        (["tfl_ttl", "--frequency", "weekly", "--feed", "lines"], ("weekly", "lines")),
     ],
 )
-def test_main_passes_frequency_to_run(fake_run, monkeypatch, argv, expected):
+def test_main_passes_arguments_to_run(fake_run, monkeypatch, argv, expected):
     monkeypatch.setattr(sys, "argv", argv)
     main.main()
     assert fake_run == [expected]
 
 
-def test_main_rejects_an_unknown_frequency(fake_run, monkeypatch, capsys):
-    monkeypatch.setattr(sys, "argv", ["tfl_ttl", "--frequency", "Weekly"])
+# argparse doesn't raise ValueError for a bad choice: it prints usage and calls
+# sys.exit(2), which raises SystemExit. 2 is the conventional "bad command line" code.
+@pytest.mark.parametrize(
+    ("argv", "bad_value"),
+    [
+        (["tfl_ttl", "--frequency", "Weekly"], "Weekly"),
+        (["tfl_ttl", "--feed", "line-status"], "line-status"),
+    ],
+)
+def test_main_rejects_unknown_values(fake_run, monkeypatch, capsys, argv, bad_value):
+    monkeypatch.setattr(sys, "argv", argv)
 
-    # argparse doesn't raise ValueError: it prints usage and calls sys.exit(2),
-    # which raises SystemExit. 2 is the conventional "bad command line" code.
     with pytest.raises(SystemExit) as excinfo:
         main.main()
 
     assert excinfo.value.code == 2
     # capsys captures what was printed; argparse writes errors to stderr.
-    assert "invalid choice: 'Weekly'" in capsys.readouterr().err
+    assert f"invalid choice: '{bad_value}'" in capsys.readouterr().err
     assert fake_run == []
