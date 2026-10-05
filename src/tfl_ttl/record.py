@@ -7,7 +7,7 @@ import gzip
 import json
 from datetime import datetime, timezone
 
-from tfl_ttl.feeds import Call
+from tfl_ttl.feeds import Call, records_of
 
 
 def poll_datetime() -> datetime:
@@ -26,16 +26,19 @@ def build_record(payload: object, call: Call, polled_at: datetime) -> dict:
     # The grain is the *scheduled* slot (08:00/17:00), but only the actual time
     # is stored. Staging derives the slot from polled_at in London time; a very
     # late run could be mislabelled. Revisit at M5 (pass the slot in instead?).
+    #
+    # This runs before validate_payload (land first, check after), so the
+    # payload may not be what's expected. len() of a dict would count its keys
+    # and look like a plausible record count; None says "no list where this feed
+    # expects one". For wrapped feeds (list_field), it counts the inner list.
+    records = records_of(payload, call)
     return {
         "polled_at": polled_at.isoformat(),
         "feed": call.feed,
         "mode": call.mode,
         # call.url never contains the app key; it's added as a request param.
         "source_url": call.url,
-        # This runs before validate_payload (land first, check after), so the
-        # payload may not be a list. len() of a dict would count its keys and
-        # look like a plausible record count; None says "this wasn't a list".
-        "record_count": len(payload) if isinstance(payload, list) else None,
+        "record_count": len(records) if records is not None else None,
         "response": payload,
     }
 

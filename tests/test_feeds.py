@@ -13,6 +13,7 @@ from tfl_ttl.feeds import (
     Call,
     Feed,
     expand_calls,
+    records_of,
     validate_payload,
 )
 
@@ -153,6 +154,82 @@ def test_non_list_raises_type_error(payload, allow_empty):
         validate_payload(payload, _call(allow_empty))
 
 
+# --- Wrapped lists (list_field) -------------------------------------------------
+# Some endpoints wrap their list in an object, e.g. stop points:
+# {"pageSize": 1751, "total": 1751, "page": 1, "stopPoints": [...]}.
+
+
+def _wrapped_call(allow_empty=False):
+    return Call(
+        feed="stop_points",
+        url="https://example.test",
+        mode="tube",
+        allow_empty=allow_empty,
+        list_field="stopPoints",
+    )
+
+
+@pytest.mark.parametrize(
+    ("payload", "call", "expected"),
+    [
+        ([{"id": "a"}], _call(False), [{"id": "a"}]),  # plain feed, plain list
+        ({"id": "a"}, _call(False), None),  # plain feed, but an object came back
+        ({"stopPoints": [{"id": "a"}]}, _wrapped_call(), [{"id": "a"}]),  # wrapped: the inner list
+        ([{"id": "a"}], _wrapped_call(), None),  # wrapped feed, but a plain list came back
+        ({"total": 1}, _wrapped_call(), None),  # wrapped, but the list field is missing
+        ({"stopPoints": "oops"}, _wrapped_call(), None),  # wrapped, but the field isn't a list
+    ],
+    ids=[
+        "plain-list",
+        "plain-got-object",
+        "wrapped",
+        "wrapped-got-list",
+        "missing-field",
+        "field-not-list",
+    ],
+)
+def test_records_of_finds_the_list_or_returns_none(payload, call, expected):
+    assert records_of(payload, call) == expected
+
+
+def test_wrapped_payload_passes():
+    validate_payload({"total": 2, "stopPoints": [{"id": "a"}, {"id": "b"}]}, _wrapped_call())
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [[{"id": "a"}], {"total": 1}, {"stopPoints": None}],
+    ids=["plain-list", "missing-field", "field-is-null"],
+)
+def test_wrapped_feed_without_its_list_raises_type_error(payload):
+    with pytest.raises(TypeError, match="expected an object with a 'stopPoints' list"):
+        validate_payload(payload, _wrapped_call())
+
+
+def test_empty_wrapped_list_raises_when_not_allowed():
+    with pytest.raises(ValueError, match="empty response"):
+        validate_payload({"total": 0, "stopPoints": []}, _wrapped_call(allow_empty=False))
+
+
+def test_paged_response_missing_records_raises():
+    # The guard: TfL says 5,000 exist but sent 1. Only the first page is ever
+    # fetched, so without this the other 4,999 would be silently missing.
+    with pytest.raises(ValueError, match="received 1 of 5000 records; the response is paged"):
+        validate_payload({"total": 5000, "stopPoints": [{"id": "a"}]}, _wrapped_call())
+
+
+def test_complete_single_page_passes():
+    # total equal to what was sent: nothing missing.
+    validate_payload(
+        {"pageSize": 2, "total": 2, "page": 1, "stopPoints": [{}, {}]}, _wrapped_call()
+    )
+
+
+def test_stop_points_calls_carry_the_list_field():
+    calls = expand_calls(feed="stop_points")
+    assert {c.list_field for c in calls} == {"stopPoints"}
+
+
 # --- The registry itself -------------------------------------------------------
 # FEEDS is configuration, but it's still code that can be wrong. These check it
 # as data, so a careless new entry fails here rather than silently at 08:00.
@@ -177,6 +254,12 @@ def test_mode_placeholder_matches_modes():
         # With modes but no {mode}: every mode would request the same URL.
         # With {mode} but no modes: the literal "{mode}" would be sent to TfL.
         assert has_placeholder == bool(feed.modes), f"{feed.name}: url and modes disagree"
+
+
+def test_list_field_is_unset_or_a_real_name():
+    # An empty string would never match a key, failing every poll of that feed.
+    for feed in FEEDS:
+        assert feed.list_field is None or feed.list_field.strip(), feed.name
 
 
 def test_every_url_is_https_tfl():

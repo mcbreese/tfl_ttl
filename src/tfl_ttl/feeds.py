@@ -38,6 +38,11 @@ class Feed:
     # Fields with defaults go last. The default must be immutable: dataclasses
     # refuse a list default, as one shared list would be reused by every Feed.
     modes: tuple[str, ...] = ()
+    # Most endpoints return a plain list. Some wrap it in an object, e.g.
+    # {"total": 1751, "stopPoints": [...]}; list_field names the key holding the
+    # list. The raw response is still stored untouched: only the checks and the
+    # record count look inside it.
+    list_field: str | None = None
 
 
 @dataclass(frozen=True)
@@ -50,6 +55,7 @@ class Call:
     # editors and linters; Python doesn't enforce them at runtime.
     mode: str | None
     allow_empty: bool
+    list_field: str | None = None
 
 
 FEEDS = (
@@ -84,6 +90,8 @@ FEEDS = (
         frequency=WEEKLY,
         allow_empty=False,
         modes=ACCEPTED_MODES,
+        # A paged object: {"pageSize", "total", "page", "stopPoints": [...]}.
+        list_field="stopPoints",
     ),
     Feed(
         name="line_status",
@@ -143,10 +151,19 @@ def expand_calls(
                         url=f.url.format(mode=mode),
                         mode=mode,
                         allow_empty=f.allow_empty,
+                        list_field=f.list_field,
                     )
                 )
         else:
-            calls.append(Call(feed=f.name, url=f.url, mode=None, allow_empty=f.allow_empty))
+            calls.append(
+                Call(
+                    feed=f.name,
+                    url=f.url,
+                    mode=None,
+                    allow_empty=f.allow_empty,
+                    list_field=f.list_field,
+                )
+            )
 
     # Both names are valid but don't match, e.g. --feed modes --frequency
     # twice_daily. Without this, the run would poll nothing and end green.
@@ -155,14 +172,38 @@ def expand_calls(
     return calls
 
 
+def records_of(payload: object, call: Call) -> list | None:
+    """The list of records in a response, or None if it isn't where this feed expects."""
+    if call.list_field is None:
+        return payload if isinstance(payload, list) else None
+    # A wrapped feed: the payload must be an object (dict) holding a list at list_field.
+    if isinstance(payload, dict) and isinstance(payload.get(call.list_field), list):
+        return payload[call.list_field]
+    return None
+
+
 def validate_payload(payload: object, call: Call) -> None:
     """Raise if the payload is unusable. Everything softer is recorded, not raised."""
-    # Only two hard fails, by design: not a list, or empty where empty isn't
-    # allowed. Stricter checks belong in dbt tests on staging, where a failure
-    # can be fixed by rerunning against raw. Messages name the feed and mode but
-    # never include payload data. {x!r} shows quotes, so stray spaces are visible.
+    # Few hard fails, by design: no list where one was expected, empty where empty
+    # isn't allowed, or a paged response that's missing pages. Stricter checks
+    # belong in dbt tests on staging, where a failure can be fixed by rerunning
+    # against raw. Messages name the feed and mode but never include payload data.
     # TypeError for a wrong type, ValueError for a wrong value: Python's convention.
-    if not isinstance(payload, list):
-        raise TypeError(f"{call.feed} ({call.mode}): expected a list, got {type(payload).__name__}")
-    if not payload and not call.allow_empty:
+    records = records_of(payload, call)
+    if records is None:
+        expected = f"an object with a {call.list_field!r} list" if call.list_field else "a list"
+        raise TypeError(
+            f"{call.feed} ({call.mode}): expected {expected}, got {type(payload).__name__}"
+        )
+    if not records and not call.allow_empty:
         raise ValueError(f"{call.feed} ({call.mode}): empty response")
+
+    # Paging guard. A paged endpoint returns one page per call; only the first is
+    # fetched. If it says there are more records than it sent, stops would be
+    # silently missing, so fail loudly instead.
+    total = payload.get("total") if isinstance(payload, dict) else None
+    if isinstance(total, int) and total > len(records):
+        raise ValueError(
+            f"{call.feed} ({call.mode}): received {len(records)} of {total} records; "
+            "the response is paged and later pages aren't fetched"
+        )

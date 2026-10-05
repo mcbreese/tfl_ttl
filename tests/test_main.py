@@ -48,13 +48,20 @@ def pipeline(monkeypatch, real_s3_client):
     monkeypatch.setattr(boto3, "client", make_client)
 
     # A test sets responses[url] to a payload, or to an exception to raise.
-    # Anything not listed gets a normal one-item list.
+    # Anything not listed gets a normal response for its feed: a one-item list,
+    # or for stop_points a one-item list wrapped the way TfL wraps it.
     responses = {}
     api_calls = []
 
+    def default_payload(url):
+        is_stop_points = "/StopPoint/Mode/" in url and not url.endswith("/Disruption")
+        if is_stop_points:
+            return {"total": 1, "stopPoints": [{"id": "ok"}]}
+        return [{"id": "ok"}]
+
     def fake_call_api(url, session=None, app_key=None):
         api_calls.append({"url": url, "app_key": app_key})
-        result = responses.get(url, [{"id": "ok"}])
+        result = responses.get(url, default_payload(url))
         if isinstance(result, Exception):
             raise result
         return result
@@ -97,6 +104,35 @@ def test_run_with_a_feed_polls_only_that_feed(pipeline):
     # One call per mode, and nothing from any other feed.
     assert len(keys) == 4
     assert all(k.startswith("raw/test/lines/") for k in keys)
+
+
+def test_wrapped_stop_points_pass_and_record_the_inner_count(pipeline):
+    tube_url = "https://api.tfl.gov.uk/StopPoint/Mode/tube"
+    pipeline.responses[tube_url] = {"total": 2, "stopPoints": [{"id": "a"}, {"id": "b"}]}
+
+    # No exception: the wrapped response is accepted for this feed.
+    main.run(feed="stop_points")
+
+    tube_upload = next(
+        c
+        for c in pipeline.s3_client.put_object.call_args_list
+        if c.kwargs["Key"].endswith("_tube.json.gz")
+    )
+    record = json.loads(gzip.decompress(tube_upload.kwargs["Body"]))
+    assert record["record_count"] == 2
+    # The raw layer keeps TfL's object exactly as sent, wrapper fields and all.
+    assert record["response"] == {"total": 2, "stopPoints": [{"id": "a"}, {"id": "b"}]}
+
+
+def test_a_paged_response_still_lands_then_fails_the_run(pipeline):
+    tube_url = "https://api.tfl.gov.uk/StopPoint/Mode/tube"
+    pipeline.responses[tube_url] = {"total": 5000, "stopPoints": [{"id": "a"}]}
+
+    with pytest.raises(RuntimeError, match=r"stop_points \(tube\)"):
+        main.run(feed="stop_points")
+
+    # Land first: the partial page is in S3 as evidence before the run fails.
+    assert any(k.endswith("_tube.json.gz") for k in uploaded_keys(pipeline))
 
 
 def test_run_passes_the_app_key_to_every_request(pipeline):

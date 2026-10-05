@@ -86,6 +86,29 @@ def test_record_count_is_none_unless_payload_is_a_list(
     assert build_record(payload, tube_status_call, fixed_time)["record_count"] == expected_count
 
 
+# Wrapped feeds count the list inside the object, not the object's keys.
+@pytest.mark.parametrize(
+    ("payload", "expected_count"),
+    [
+        ({"total": 3, "stopPoints": [{}, {}, {}]}, 3),
+        ({"total": 0, "stopPoints": []}, 0),
+        ({"total": 3}, None),  # the list is missing: honest None, not 1 (the key count)
+    ],
+)
+def test_record_count_for_a_wrapped_feed_counts_the_inner_list(payload, expected_count, fixed_time):
+    call = Call(
+        feed="stop_points",
+        url="https://api.tfl.gov.uk/StopPoint/Mode/tube",
+        mode="tube",
+        allow_empty=False,
+        list_field="stopPoints",
+    )
+    record = build_record(payload, call, fixed_time)
+    assert record["record_count"] == expected_count
+    # The response is still stored exactly as received, wrapper and all.
+    assert record["response"] is payload
+
+
 # --- to_gzipped_line -----------------------------------------------------------
 
 
