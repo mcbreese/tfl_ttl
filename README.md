@@ -162,8 +162,20 @@ uv run python -m tfl_ttl --feed modes         # one feed
 uv run python -m tfl_ttl --frequency weekly   # every weekly feed
 ```
 
-Set `S3_PREFIX=raw/tfl_verify` first to keep test polls out of the real
-history; a lifecycle rule empties that folder after 7 days.
+Those land in `raw/tfl/`, the real history. For a test poll, send it to
+`raw/tfl_verify/` instead (a lifecycle rule empties that folder after 7 days)
+by setting `S3_PREFIX` for one command only. A variable already set in the
+shell wins over `.env`, so `.env` stays untouched:
+
+```powershell
+# PowerShell
+$env:S3_PREFIX = "raw/tfl_verify"; uv run python -m tfl_ttl --feed modes; Remove-Item Env:S3_PREFIX
+```
+
+```bash
+# bash
+S3_PREFIX=raw/tfl_verify uv run python -m tfl_ttl --feed modes
+```
 
 **Profile the data**
 
