@@ -10,6 +10,8 @@ dependencies = [
     "requests",
     "python-dotenv",
     "boto3",
+    # Timezone database for zoneinfo (Europe/London). Windows has none built in.
+    "tzdata",
 ]
 
 [dependency-groups]

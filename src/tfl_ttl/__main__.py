@@ -6,13 +6,16 @@
 # Three layers, each wrapping the one before:
 #   poll()  one request: fetch -> record -> key -> upload -> validate
 #   run()   one run: setup once, loop over every call, collect failures
-#   main()  the command line: read --frequency, configure logging, call run()
+#   main()  the command line: read the options, configure logging, call run().
+#           Scheduled runs (--scheduled-at) first ask schedule.py whether to
+#           poll and which feeds.
 # Anything can plug in at the layer it needs: the notebook or a future Lambda
 # handler calls run() directly, and a test can call poll() with fakes. Moving
 # off GitHub Actions means a new small entry point that calls run(), nothing else.
 
 import argparse
 import logging
+from datetime import date, datetime
 
 import boto3
 import requests
@@ -22,6 +25,7 @@ from tfl_ttl import config
 from tfl_ttl.feeds import FEED_NAMES, FREQUENCIES, Call, expand_calls, validate_payload
 from tfl_ttl.record import build_record, generate_s3_key, poll_datetime, to_gzipped_line
 from tfl_ttl.s3 import upload_to_s3
+from tfl_ttl.schedule import plan_scheduled_run
 from tfl_ttl.tfl_api import call_api, create_robust_session
 
 logger = logging.getLogger(__name__)
@@ -84,14 +88,57 @@ def main() -> None:
         choices=FEED_NAMES,
         help="Only poll this one feed (all its modes). Useful for verifying feeds one at a time.",
     )
+    # For scheduled runs. The scheduler says when the run was scheduled for, and
+    # the gate in schedule.py decides whether to poll and which feeds.
+    parser.add_argument(
+        "--scheduled-at",
+        # type= turns the text into a datetime; a ValueError inside it makes
+        # argparse print an "invalid value" error and exit with code 2.
+        type=_parse_utc_datetime,
+        help="When this run was scheduled for, in UTC, e.g. 2026-10-06T07:00:00Z.",
+    )
+    parser.add_argument(
+        "--end-date",
+        type=date.fromisoformat,
+        help="Last date (London) to poll on. Scheduled runs after it skip.",
+    )
     args = parser.parse_args()
+
+    # The scheduler picks the feeds, so naming them as well would be contradictory.
+    if args.scheduled_at and (args.frequency or args.feed):
+        parser.error("--scheduled-at can't be combined with --frequency or --feed")
+    # An end date only means something for scheduled runs.
+    if args.end_date and not args.scheduled_at:
+        parser.error("--end-date only applies with --scheduled-at")
 
     # Configured here, once, in the entry point. Library modules only create
     # loggers; configuring logging inside them would fight whatever imports them.
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
     )
-    run(args.frequency, args.feed)
+
+    if args.scheduled_at:
+        plan = plan_scheduled_run(args.scheduled_at, args.end_date)
+        logger.info(plan.reason)
+        # A skip isn't a failure: it's the other run of a UTC pair, or past the
+        # end date. Returning normally exits 0, so the run shows green.
+        if not plan.should_run:
+            return
+        run(plan.frequency)
+    else:
+        run(args.frequency, args.feed)
+
+
+def _parse_utc_datetime(text: str) -> datetime:
+    """Parse an ISO datetime like 2026-10-06T07:00:00Z, requiring a timezone."""
+    # Python 3.10's fromisoformat doesn't understand a trailing "Z" (it was
+    # added in 3.11), so swap it for the equivalent "+00:00".
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        raise ValueError(f"no timezone in {text!r}")
+    return parsed
 
 
 # __name__ is "__main__" only when this file runs as the program (python -m

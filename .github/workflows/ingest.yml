@@ -1,0 +1,116 @@
+# Scheduled TfL ingestion: polls at 08:00 and 17:00 London time and lands the
+# raw responses in S3. Runs in GitHub's cloud, so the laptop doesn't need to be on.
+name: Ingest
+
+on:
+  schedule:
+    # GitHub schedules in UTC only. London is UTC in winter (GMT) and UTC+1 in
+    # summer (BST), so each poll time has two UTC triggers. The script's gate
+    # (src/tfl_ttl/schedule.py) lets exactly one of each pair poll; the other
+    # logs why and exits green.
+    - cron: "0 7 * * *"   # 08:00 London in summer
+    - cron: "0 8 * * *"   # 08:00 London in winter
+    - cron: "0 16 * * *"  # 17:00 London in summer
+    - cron: "0 17 * * *"  # 17:00 London in winter
+  # A "Run workflow" button in the Actions tab, for testing one feed by hand.
+  workflow_dispatch:
+    inputs:
+      feed:
+        description: Feed to poll
+        type: choice
+        # Must match FEEDS in src/tfl_ttl/feeds.py. If they drift, the script's
+        # own --feed check rejects the unknown name and the run fails loudly.
+        options:
+          - modes
+          - severity
+          - disruption_categories
+          - lines
+          - stop_points
+          - line_status
+          - stop_point_disruptions
+      prefix:
+        description: Where in S3 to land it
+        type: choice
+        # Defaults to the test folder, which a lifecycle rule empties after 7
+        # days, so hand-run tests don't mix with the real scheduled history.
+        default: raw/tfl_verify
+        options:
+          - raw/tfl_verify
+          - raw/tfl
+
+permissions:
+  # Read the repo's code, nothing more.
+  contents: read
+  # Let the job ask GitHub for an OIDC token: the signed "this is a run of
+  # mcbreese/tfl_ttl on master" that AWS swaps for temporary credentials.
+  id-token: write
+
+# One ingestion at a time. Unlike CI, never cancel an in-progress run: a
+# cancelled poll is data that can't be fetched again.
+concurrency:
+  group: ingest
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    name: Poll TfL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Don't leave the repo's own token on disk for later steps to use.
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+
+      # Log in to AWS with OIDC: no stored keys. AWS checks the token against
+      # the role's trust policy (this repo, master branch only) and returns
+      # credentials that expire within an hour. The role can only upload into
+      # raw/tfl/ and raw/tfl_verify/.
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: eu-west-2
+          # The repo is public, so these logs are public. Off by default.
+          mask-aws-account-id: true
+
+      # The package and its runtime dependencies only: no dev or test tools.
+      - name: Install
+        run: uv sync --locked --no-default-groups
+
+      - name: Poll on schedule
+        if: github.event_name == 'schedule'
+        env:
+          # The cron line that triggered this run, e.g. "0 7 * * *". Passed in
+          # through env rather than written into the script with ${{ }}: values
+          # pasted straight into a script can inject commands.
+          SCHEDULE: ${{ github.event.schedule }}
+          # Repo variable: the last London date to poll on. If it's unset, the
+          # script rejects the empty value and the run fails loudly, rather than
+          # collecting forever.
+          INGEST_END_DATE: ${{ vars.INGEST_END_DATE }}
+          # Secrets, so GitHub masks them as *** in these public logs.
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          TFL_APP_KEY: ${{ secrets.TFL_APP_KEY }}
+        run: |
+          # Split "0 7 * * *" into minute=0, hour=7 (the rest is ignored).
+          read -r minute hour _ <<< "$SCHEDULE"
+          # The time this run was SCHEDULED for, today in UTC. GitHub often
+          # starts runs late; the gate uses this, not the clock, so a late run
+          # still counts as its slot. (A delay past midnight UTC would misdate
+          # it, but the latest trigger is 17:00 UTC, so that needs 7+ hours.)
+          scheduled_at="$(date -u +%Y-%m-%d)T$(printf '%02d:%02d' "$hour" "$minute"):00Z"
+          echo "Scheduled for $scheduled_at"
+          uv run --no-sync python -m tfl_ttl --scheduled-at "$scheduled_at" --end-date "$INGEST_END_DATE"
+
+      - name: Poll by hand
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          FEED: ${{ inputs.feed }}
+          S3_PREFIX: ${{ inputs.prefix }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          TFL_APP_KEY: ${{ secrets.TFL_APP_KEY }}
+        run: uv run --no-sync python -m tfl_ttl --feed "$FEED"

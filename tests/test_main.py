@@ -17,6 +17,7 @@ import gzip
 import json
 import logging
 import sys
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -268,4 +269,91 @@ def test_main_rejects_unknown_values(fake_run, monkeypatch, capsys, argv, bad_va
     assert excinfo.value.code == 2
     # capsys captures what was printed; argparse writes errors to stderr.
     assert f"invalid choice: '{bad_value}'" in capsys.readouterr().err
+    assert fake_run == []
+
+
+# --- main(): scheduled runs ----------------------------------------------------
+# The gate's own logic is tested in test_schedule.py; these check the wiring:
+# the scheduled time gets parsed, passed to the gate, and the gate's answer used.
+
+
+@pytest.mark.parametrize(
+    ("scheduled_at", "expected_runs"),
+    [
+        ("2026-10-06T07:00:00Z", [("twice_daily", None)]),  # Tue 08:00 London (BST)
+        ("2026-10-05T07:00:00Z", [(None, None)]),  # Mon 08:00 London: every feed
+        ("2026-10-06T08:00:00Z", []),  # Tue 09:00 London: the other run of the pair
+        ("2026-10-06T07:00:00+00:00", [("twice_daily", None)]),  # "+00:00" works as well as "Z"
+    ],
+    ids=["weekday-poll", "monday-all-feeds", "pair-skips", "offset-form"],
+)
+def test_scheduled_run_follows_the_gate(fake_run, monkeypatch, scheduled_at, expected_runs):
+    monkeypatch.setattr(sys, "argv", ["tfl_ttl", "--scheduled-at", scheduled_at])
+    main.main()
+    assert fake_run == expected_runs
+
+
+def test_scheduled_run_records_the_real_poll_time_not_the_scheduled_time(pipeline, monkeypatch):
+    # The scheduled time only decides WHETHER to poll. What lands in S3 must say
+    # when the poll really happened, even if the run started late, or the data
+    # would be lying about when TfL was asked.
+    monkeypatch.setattr(logging, "basicConfig", lambda **kwargs: None)
+    scheduled_for = "2026-10-06T07:00:00Z"  # Tue 08:00 London: a poll time, long ago
+    monkeypatch.setattr(sys, "argv", ["tfl_ttl", "--scheduled-at", scheduled_for])
+    before = datetime.now(timezone.utc)
+
+    main.main()
+
+    after = datetime.now(timezone.utc)
+    first_upload = pipeline.s3_client.put_object.call_args_list[0]
+    record = json.loads(gzip.decompress(first_upload.kwargs["Body"]))
+    polled_at = datetime.fromisoformat(record["polled_at"])
+    # The real clock at the moment of polling, not 2026-10-06 07:00.
+    assert before <= polled_at <= after
+    assert "20261006T070000Z" not in first_upload.kwargs["Key"]
+
+
+def test_scheduled_skip_logs_why_and_exits_cleanly(fake_run, monkeypatch, caplog):
+    caplog.set_level(logging.INFO, logger="__main__")
+    caplog.set_level(logging.INFO, logger="tfl_ttl.__main__")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["tfl_ttl", "--scheduled-at", "2026-10-06T07:00:00Z", "--end-date", "2026-10-01"],
+    )
+
+    # Returns normally (no SystemExit, no exception): a skip is a green run.
+    main.main()
+
+    assert fake_run == []
+    assert "past the end date 2026-10-01" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (
+            ["tfl_ttl", "--scheduled-at", "2026-10-06T07:00:00Z", "--feed", "modes"],
+            "can't be combined with --frequency or --feed",
+        ),
+        (["tfl_ttl", "--end-date", "2026-11-06"], "--end-date only applies with --scheduled-at"),
+        # No timezone: refused rather than guessed.
+        (["tfl_ttl", "--scheduled-at", "2026-10-06T07:00:00"], "invalid _parse_utc_datetime value"),
+        (["tfl_ttl", "--scheduled-at", "tomorrow"], "invalid _parse_utc_datetime value"),
+        # An unset GitHub variable arrives as an empty string: fail, don't run forever.
+        (
+            ["tfl_ttl", "--scheduled-at", "2026-10-06T07:00:00Z", "--end-date", ""],
+            "invalid fromisoformat value",
+        ),
+    ],
+    ids=["schedule-and-feed", "end-date-alone", "no-timezone", "not-a-date", "empty-end-date"],
+)
+def test_bad_scheduling_arguments_are_rejected(fake_run, monkeypatch, capsys, argv, message):
+    monkeypatch.setattr(sys, "argv", argv)
+
+    with pytest.raises(SystemExit) as excinfo:
+        main.main()
+
+    assert excinfo.value.code == 2
+    assert message in capsys.readouterr().err
     assert fake_run == []
