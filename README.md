@@ -100,11 +100,34 @@ Coverage must stay at 100% (`fail_under` in `pyproject.toml`), and CI runs the
 suite on Python 3.10 and 3.13. 100% means every line ran, not that every
 behaviour is checked, so new code still needs tests that assert something.
 
-## Current stage: EDA
+## Scheduled ingestion
 
-```bash
-uv run jupyter lab
-```
+[`.github/workflows/ingest.yml`](.github/workflows/ingest.yml) polls TfL at
+08:00 and 17:00 London time and lands the raw responses under `raw/tfl/` in
+S3. Every run polls the twice-daily feeds; the Monday 08:00 run also polls the
+weekly ones.
 
-Open [notebooks/01_tfl_api_eda.ipynb](notebooks/01_tfl_api_eda.ipynb) to
-explore the TfL API directly.
+- **Clocks changing.** GitHub schedules in UTC, so each poll time has two
+  triggers (07:00 and 08:00 UTC, 16:00 and 17:00 UTC). The gate in
+  `src/tfl_ttl/schedule.py` lets exactly one of each pair poll, judged on the
+  time the run was *scheduled* for, so a run GitHub starts late still counts.
+  The data always records when the poll really happened (`polled_at`).
+- **End date.** Scheduled runs skip themselves after the repo variable
+  `INGEST_END_DATE` (a London date, inclusive). Edit it to extend collection.
+- **AWS access.** No stored keys: the workflow logs in with OIDC to the IAM
+  role `tfl-raw-writer-github`, which only the `master` branch of this repo can
+  use and which can only upload into `raw/tfl/` and `raw/tfl_verify/`.
+- **Settings it needs** (Settings → Secrets and variables → Actions):
+  secrets `AWS_ROLE_ARN`, `S3_BUCKET` and `TFL_APP_KEY` (secrets so they're
+  masked in the public logs), and variable `INGEST_END_DATE`.
+- **Manual test runs.** Actions → Ingest → Run workflow: pick one feed, landing
+  in `raw/tfl_verify/` by default. A lifecycle rule deletes that folder's files
+  after 7 days.
+
+## Current stage
+
+Collecting data on the schedule above. Every feed has been profiled in
+[notebooks/02_raw_profiling.ipynb](notebooks/02_raw_profiling.ipynb) (DuckDB);
+its views are first drafts of the staging models. Next: an Athena table over
+`raw/tfl/`, then dbt-athena models. Design decisions and the dimensional model
+live in the TFL Project page in Notion.
