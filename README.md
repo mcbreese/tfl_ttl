@@ -118,7 +118,6 @@ notebooks/
   ci.yml             Lint, format and tests on every PR and push to master
   ingest.yml         The scheduled ingestion
 data/                Local downloads and DuckDB database (gitignored)
-docs/                GitHub Pages site
 ```
 
 ## Security model
