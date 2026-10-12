@@ -41,6 +41,7 @@ def call_api(
     url: str,
     session: requests.Session | None = None,
     app_key: str | None = None,
+    read_timeout: float = 10,
 ) -> object:
     """GET a TfL URL and return the parsed JSON. Raises on any HTTP or network error."""
     # "Use the session if given, otherwise plain requests" (None is falsy).
@@ -52,7 +53,9 @@ def call_api(
     logger.info("Fetching %s", url)
     try:
         # timeout=(connect, read) in seconds. Without one, a request can hang forever.
-        response = http.get(url, params=params, timeout=(3, 10))
+        # The read timeout is the longest gap between bytes, not a limit on the
+        # whole download, so it mostly bites while TfL builds the response.
+        response = http.get(url, params=params, timeout=(3, read_timeout))
         # requests does NOT raise on a bad status by itself. This raises
         # HTTPError for any 4xx/5xx and does nothing on success.
         response.raise_for_status()

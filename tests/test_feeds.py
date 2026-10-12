@@ -29,6 +29,13 @@ def test_feed_with_modes_fills_mode_into_url():
     assert tube_call.allow_empty is False
 
 
+def test_read_timeout_is_copied_from_feed_to_call():
+    calls = expand_calls()
+    stop_points = [c for c in calls if c.feed == "stop_points"]
+    assert stop_points and all(c.read_timeout == 30 for c in stop_points)
+    assert all(c.read_timeout == 10 for c in calls if c.feed != "stop_points")
+
+
 def test_feed_without_modes_has_mode_none_and_url_unchanged():
     calls = expand_calls()
     modes_call = next(c for c in calls if c.feed == "modes")

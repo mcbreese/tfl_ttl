@@ -85,6 +85,13 @@ def test_request_has_a_timeout():
     assert session.calls[0]["timeout"] == (3, 10)
 
 
+def test_read_timeout_can_be_raised_per_call():
+    # Slow endpoints (stop_points) pass a longer read timeout; connect stays short.
+    session = FakeSession()
+    call_api(URL, session=session, read_timeout=30)
+    assert session.calls[0]["timeout"] == (3, 30)
+
+
 def test_without_a_session_it_uses_plain_requests(monkeypatch):
     # The `session or requests` fallback. The notebook calls it this way.
     calls = []

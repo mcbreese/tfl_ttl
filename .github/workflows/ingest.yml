@@ -100,8 +100,13 @@ jobs:
           read -r minute hour _ <<< "$SCHEDULE"
           # The time this run was SCHEDULED for, today in UTC. GitHub often
           # starts runs late; the gate uses this, not the clock, so a late run
-          # still counts as its slot. (A delay past midnight UTC would misdate
-          # it, but the latest trigger is 17:00 UTC, so that needs 7+ hours.)
+          # still counts as its slot. A start delayed past midnight UTC gets
+          # tomorrow's date. That isn't far-fetched: the 07:00 UTC run on
+          # 12 Oct 2026 started at 16:20, over 9 hours late, so the 16:00 and
+          # 17:00 triggers can cross midnight. The gate only answers differently
+          # on the day the clocks change (the pair may poll twice or not at all)
+          # or on the end date itself (its evening poll skips). S3 keys
+          # use the real fetch time, so landed data is never misdated.
           scheduled_at="$(date -u +%Y-%m-%d)T$(printf '%02d:%02d' "$hour" "$minute"):00Z"
           echo "Scheduled for $scheduled_at"
           uv run --no-sync python -m tfl_ttl --scheduled-at "$scheduled_at" --end-date "$INGEST_END_DATE"
