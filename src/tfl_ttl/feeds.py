@@ -43,6 +43,9 @@ class Feed:
     # list. The raw response is still stored untouched: only the checks and the
     # record count look inside it.
     list_field: str | None = None
+    # Seconds to wait for TfL to start (or keep) sending a response. Short by
+    # default so a hung feed fails fast; raised only for endpoints known to be slow.
+    read_timeout: float = 10
 
 
 @dataclass(frozen=True)
@@ -56,6 +59,7 @@ class Call:
     mode: str | None
     allow_empty: bool
     list_field: str | None = None
+    read_timeout: float = 10
 
 
 FEEDS = (
@@ -92,6 +96,10 @@ FEEDS = (
         modes=ACCEPTED_MODES,
         # A paged object: {"pageSize", "total", "page", "stopPoints": [...]}.
         list_field="stopPoints",
+        # Tube is the biggest response and has taken over 10s to start arriving
+        # (12 Oct 2026). Worst case is 4 modes x 4 attempts x 30s = 8 minutes,
+        # inside the workflow's 15-minute limit; 60s would not be.
+        read_timeout=30,
     ),
     Feed(
         name="line_status",
@@ -152,6 +160,7 @@ def expand_calls(
                         mode=mode,
                         allow_empty=f.allow_empty,
                         list_field=f.list_field,
+                        read_timeout=f.read_timeout,
                     )
                 )
         else:
@@ -162,6 +171,7 @@ def expand_calls(
                     mode=None,
                     allow_empty=f.allow_empty,
                     list_field=f.list_field,
+                    read_timeout=f.read_timeout,
                 )
             )
 

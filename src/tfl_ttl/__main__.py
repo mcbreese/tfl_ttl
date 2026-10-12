@@ -33,7 +33,9 @@ logger = logging.getLogger(__name__)
 
 def poll(call: Call, session: requests.Session, s3_client: BaseClient) -> None:
     polled_at = poll_datetime()
-    payload = call_api(call.url, session=session, app_key=config.TFL_APP_KEY)
+    payload = call_api(
+        call.url, session=session, app_key=config.TFL_APP_KEY, read_timeout=call.read_timeout
+    )
 
     record = build_record(payload, call, polled_at)
     key = generate_s3_key(config.S3_PREFIX, call, polled_at)

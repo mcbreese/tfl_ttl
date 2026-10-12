@@ -60,8 +60,8 @@ def pipeline(monkeypatch, real_s3_client):
             return {"total": 1, "stopPoints": [{"id": "ok"}]}
         return [{"id": "ok"}]
 
-    def fake_call_api(url, session=None, app_key=None):
-        api_calls.append({"url": url, "app_key": app_key})
+    def fake_call_api(url, session=None, app_key=None, read_timeout=10):
+        api_calls.append({"url": url, "app_key": app_key, "read_timeout": read_timeout})
         result = responses.get(url, default_payload(url))
         if isinstance(result, Exception):
             raise result
@@ -105,6 +105,14 @@ def test_run_with_a_feed_polls_only_that_feed(pipeline):
     # One call per mode, and nothing from any other feed.
     assert len(keys) == 4
     assert all(k.startswith("raw/test/lines/") for k in keys)
+
+
+def test_each_call_uses_its_feeds_read_timeout(pipeline):
+    main.run("weekly")
+
+    timeouts = {c["url"]: c["read_timeout"] for c in pipeline.api_calls}
+    assert timeouts["https://api.tfl.gov.uk/StopPoint/Mode/tube"] == 30
+    assert timeouts["https://api.tfl.gov.uk/Line/Mode/tube"] == 10
 
 
 def test_wrapped_stop_points_pass_and_record_the_inner_count(pipeline):
